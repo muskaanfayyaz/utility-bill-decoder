@@ -7,7 +7,7 @@ from source.validate import validate_level1_csv, validate_level2_csv
 MAX_ZIP_SIZE_BYTES = 15 * 1024 * 1024  # 15 MB limit per Section 7
 
 
-def package_submission(zip_filename: str = "your-submission.zip") -> None:
+def package_submission(zip_filename: str = "your-submission.zip") -> Path:
     root_dir = Path(".")
     source_dir = root_dir / "source"
     output_dir = root_dir / "output"
@@ -22,53 +22,51 @@ def package_submission(zip_filename: str = "your-submission.zip") -> None:
     level1_csv = output_dir / "level1.csv"
     level2_csv = output_dir / "level2.csv"
 
-    if not level1_csv.exists() or not level2_csv.exists():
-        print("WARNING: output/level1.csv or output/level2.csv not found yet. Running package anyway...")
-    else:
-        print("Validating output CSVs prior to packaging...")
-        # Check rows count if test data (expected 10 and 120)
-        l1_errs = validate_level1_csv(level1_csv, expected_count=10)
-        l2_errs = validate_level2_csv(level2_csv, expected_count=120)
-        if l1_errs or l2_errs:
-            print("WARNING: CSV validation found potential discrepancies:")
-            for err in l1_errs + l2_errs:
-                print(f"  - {err}")
+    if not level1_csv.exists():
+        raise FileNotFoundError(f"Missing required output file: {level1_csv}")
+    if not level2_csv.exists():
+        raise FileNotFoundError(f"Missing required output file: {level2_csv}")
+
+    print("Validating output CSVs prior to packaging...")
+    l1_errs = validate_level1_csv(level1_csv, expected_count=10)
+    l2_errs = validate_level2_csv(level2_csv, expected_count=120)
+
+    if l1_errs or l2_errs:
+        error_msg = "\n".join(l1_errs + l2_errs)
+        raise RuntimeError(f"CSV Validation failed prior to packaging:\n{error_msg}")
+
+    print("CSV validation passed: level1.csv (10 rows), level2.csv (120 rows).")
 
     # Build ZIP archive
     zip_path = root_dir / zip_filename
     if zip_path.exists():
         zip_path.unlink()
 
-    forbidden_patterns = [".env", "__pycache__", ".git", ".pytest_cache", ".pyc"]
+    forbidden_patterns = [".env", "__pycache__", ".git", ".pytest_cache", ".pyc", ".cache"]
 
     print(f"Creating submission ZIP: {zip_path.name}")
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zipf:
         # Add source files
-        for file in source_dir.rglob("*"):
+        for file in sorted(source_dir.rglob("*")):
             if file.is_file():
-                # Strictly exclude real .env and cache files
-                if any(p in file.name for p in forbidden_patterns) and file.name != ".env.example":
-                    print(f"Skipping forbidden file: {file}")
+                # Strictly exclude real .env, caches, and pyc
+                if any(p in file.as_posix() for p in forbidden_patterns) and file.name != ".env.example":
                     continue
                 rel_path = file.relative_to(root_dir)
-                zipf.write(file, arcname=str(rel_path))
-                print(f"Added {rel_path}")
+                zipf.write(file, arcname=str(rel_path).replace("\\", "/"))
 
         # Add output files
-        if output_dir.exists():
-            for file in output_dir.rglob("*"):
-                if file.is_file() and file.suffix.lower() == ".csv":
-                    rel_path = file.relative_to(root_dir)
-                    zipf.write(file, arcname=str(rel_path))
-                    print(f"Added {rel_path}")
+        for file in sorted(output_dir.rglob("*")):
+            if file.is_file() and file.suffix.lower() == ".csv":
+                rel_path = file.relative_to(root_dir)
+                zipf.write(file, arcname=str(rel_path).replace("\\", "/"))
 
         # Add demo files if any
         if demo_dir.exists():
-            for file in demo_dir.rglob("*"):
+            for file in sorted(demo_dir.rglob("*")):
                 if file.is_file() and file.suffix.lower() in [".mp4", ".mov", ".webm"]:
                     rel_path = file.relative_to(root_dir)
-                    zipf.write(file, arcname=str(rel_path))
-                    print(f"Added {rel_path}")
+                    zipf.write(file, arcname=str(rel_path).replace("\\", "/"))
 
     size_bytes = zip_path.stat().st_size
     size_mb = size_bytes / (1024 * 1024)
@@ -80,7 +78,8 @@ def package_submission(zip_filename: str = "your-submission.zip") -> None:
             "Please compress demo video or remove large assets."
         )
 
-    print("Submission ZIP is ready and compliant with structure rules.")
+    print("Submission ZIP successfully created and verified.")
+    return zip_path
 
 
 if __name__ == "__main__":
