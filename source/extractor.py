@@ -163,10 +163,23 @@ class BillExtractor:
         cleaned = clean_json_response(repaired_text)
         return json.loads(cleaned)
 
-    def extract(self, image_path: Union[str, Path]) -> Level1Bill:
+    def extract(self, image_path: Union[str, Path], use_cache: bool = True) -> Level1Bill:
         image_path = Path(image_path)
         if not image_path.exists():
             raise FileNotFoundError(f"Bill image not found: {image_path}")
+
+        cache_dir = Path(".cache/level1")
+        cache_file = cache_dir / f"{image_path.stem}.json"
+
+        if use_cache and cache_file.exists():
+            try:
+                with open(cache_file, "r", encoding="utf-8") as f:
+                    cached_data = json.load(f)
+                bill = Level1Bill.model_validate(cached_data)
+                logger.info(f"Loaded Level 1 extraction from cache for '{image_path.stem}'.")
+                return bill
+            except Exception as e:
+                logger.warning(f"Cache read error for {image_path.stem}: {e}. Re-extracting...")
 
         mime_type = get_image_mime_type(image_path)
         with open(image_path, "rb") as f:
@@ -219,4 +232,13 @@ class BillExtractor:
 
         # Validate with strict Pydantic model
         bill = Level1Bill.model_validate(raw_data)
+
+        # Save to cache
+        try:
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            with open(cache_file, "w", encoding="utf-8") as f:
+                json.dump(raw_data, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.warning(f"Could not write cache file for {image_path.stem}: {e}")
+
         return bill

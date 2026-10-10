@@ -61,12 +61,31 @@ class BillExplainer:
         image_path: Union[str, Path],
         bill: Level1Bill,
         questions: List[Tuple[str, str]],  # List of (question_id, question_text)
+        use_cache: bool = True,
     ) -> Dict[str, str]:
         """
         Answers a list of questions for a bill in a single request.
         Falls back to individual answering if batch parsing fails or if any question is omitted.
         """
         image_path = Path(image_path)
+        cache_dir = Path(".cache/level2")
+        cache_file = cache_dir / f"{image_path.stem}.json"
+
+        if use_cache and cache_file.exists():
+            try:
+                with open(cache_file, "r", encoding="utf-8") as f:
+                    cached_answers = json.load(f)
+                # Check if all questions are present and non-empty
+                all_present = all(
+                    qid in cached_answers and isinstance(cached_answers[qid], str) and cached_answers[qid].strip()
+                    for qid, _ in questions
+                )
+                if all_present:
+                    logger.info(f"Loaded Level 2 answers from cache for '{image_path.stem}'.")
+                    return {qid: cached_answers[qid] for qid, _ in questions}
+            except Exception as e:
+                logger.warning(f"Cache read error for {image_path.stem}: {e}. Re-generating answers...")
+
         mime_type = get_image_mime_type(image_path)
         with open(image_path, "rb") as f:
             image_bytes = f.read()
@@ -135,6 +154,14 @@ Return a valid JSON object mapping each question_id to its specific English answ
             for qid, qtext in missing_qids:
                 logger.warning(f"Batch response missed {qid}. Falling back to individual query...")
                 result[qid] = self.answer_single_question(image_path, bill, qid, qtext)
+
+            # Save to cache
+            try:
+                cache_dir.mkdir(parents=True, exist_ok=True)
+                with open(cache_file, "w", encoding="utf-8") as f:
+                    json.dump(result, f, ensure_ascii=False, indent=2)
+            except Exception as e:
+                logger.warning(f"Could not write cache file for {image_path.stem}: {e}")
 
             return result
 
