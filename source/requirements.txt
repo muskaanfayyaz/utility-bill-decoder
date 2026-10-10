@@ -1,0 +1,4 @@
+google-genai==2.20.0
+pydantic==2.13.5
+python-dotenv==1.2.3
+tenacity==9.1.4
